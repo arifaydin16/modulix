@@ -1,17 +1,17 @@
-# Modularization CLI
+# Modulix CLI
 
 <!-- [![npm version](https://img.shields.io/badge/npm-1.0.0-blue.svg)](https://www.npmjs.com/) -->
 [![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](https://opensource.org/licenses/ISC)
 
-**Modularization** is a modern, lightweight global CLI and programmatic Node.js library designed to dynamically enable, disable, and synchronize feature-based code blocks across your codebase. 
+**Modulix** is a modern, lightweight global CLI and programmatic Node.js library designed to dynamically enable, disable, and synchronize feature-based code blocks across your codebase. 
 
-By utilizing special syntax tags inside code comments, Modularization allows you to toggle feature blocks on and off on-demand, clean up inactive feature code, and store clean, block-only templates without cluttering your repository.
+By utilizing special syntax tags inside code comments, Modulix allows you to toggle feature blocks on and off on-demand, clean up inactive feature code, and store clean, block-only templates without cluttering your repository.
 
 ---
 
 ## Key Features
 
--  **Dynamic Code Syncing**: Dills or cleans up code between tag markers based on whether the module is enabled or disabled.
+-  **Dynamic Code Syncing**: Fills or cleans up code between tag markers based on whether the module is enabled or disabled.
 -  **Block-Based Templates**: Stores *only* the tagged code blocks inside templates, rather than copying entire files.
 -  **Beautiful Interactive CLI**: Built using `@clack/prompts` for premium terminal visuals, spinner animations, and checkbox selectors.
 -  **Smart File Filtering**: Supports `includes` and `excludes` rules to filter files during template creation and syncing.
@@ -21,13 +21,19 @@ By utilizing special syntax tags inside code comments, Modularization allows you
 
 ## Installation
 
-Install globally using `npm` to run it anywhere:
+Install locally in your project:
 
 ```bash
-npm install --save-dev modularization
+npm install --save-dev modulix
 ```
 
-This installs both the `modularization` and its shortcut alias `mdl` command.
+Or install globally:
+
+```bash
+npm install -g modulix
+```
+
+This installs both the `modulix` and its shortcut alias `mdl` command.
 
 ---
 

@@ -5,10 +5,17 @@ import { ConfigManager } from './config.js';
 import { readAllFiles, validateModuleTags, extractBlockedContent } from './utils.js';
 
 export class TemplateManager {
-  private static templatesDir = path.join(os.homedir(), '.modularization', 'templates');
-
   static getTemplatesDir(): string {
-    return this.templatesDir;
+    const localDir = path.join(process.cwd(), '.modularization');
+    const localFile = path.join(localDir, 'config.json');
+    if (fs.existsSync(localFile)) {
+      return path.join(localDir, 'templates');
+    }
+    return path.join(os.homedir(), '.modularization', 'templates');
+  }
+
+  private static get templatesDir(): string {
+    return this.getTemplatesDir();
   }
 
   static async add(templateName: string): Promise<{ success: boolean; message: string }> {

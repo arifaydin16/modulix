@@ -1,5 +1,5 @@
 {
-  "name": "modularization",
+  "name": "modulix",
   "version": "1.0.0",
   "description": "A global CLI tool for modularization",
   "main": "dist/index.js",
@@ -7,9 +7,13 @@
   "types": "dist/index.d.ts",
   "type": "module",
   "bin": {
-    "modularization": "./dist/cli.js",
+    "modulix": "./dist/cli.js",
     "mdl": "./dist/cli.js"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",

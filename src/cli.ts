@@ -12,7 +12,7 @@ import { existsSync } from 'node:fs';
 const program = new Command();
 
 program
-  .name('modularization')
+  .name('modulix')
   .description('A global CLI tool for modularization')
   .version('1.0.0');
 
@@ -444,6 +444,20 @@ configCmd.command('show')
     intro(pc.cyan(' Current Configuration '));
     console.log(JSON.stringify(configData, null, 2));
     outro(pc.green(`Configuration path: ${ConfigManager.getFilePath()}`));
+  });
+
+// init command
+program
+  .command('init')
+  .description('Initialize local configuration in the current directory')
+  .action(() => {
+    intro(pc.cyan(' mdl init '));
+    const result = ConfigManager.initLocal();
+    if (result.success) {
+      outro(pc.green(`🎉 ${result.message}`));
+    } else {
+      outro(pc.red(`❌ ${result.message}`));
+    }
   });
 
 const templatesCmd = program

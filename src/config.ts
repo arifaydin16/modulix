@@ -25,16 +25,46 @@ export interface Config {
 }
 
 export class ConfigManager {
-  private static configDir = path.join(os.homedir(), '.modularization');
-  private static configFile = path.join(this.configDir, 'config.json');
+  private static getPaths() {
+    const localDir = path.join(process.cwd(), '.modularization');
+    const localFile = path.join(localDir, 'config.json');
+    if (fs.existsSync(localFile)) {
+      return { configDir: localDir, configFile: localFile, isLocal: true };
+    }
+    const globalDir = path.join(os.homedir(), '.modularization');
+    const globalFile = path.join(globalDir, 'config.json');
+    return { configDir: globalDir, configFile: globalFile, isLocal: false };
+  }
 
+  static initLocal(): { success: boolean; message: string } {
+    const localDir = path.join(process.cwd(), '.modularization');
+    const localFile = path.join(localDir, 'config.json');
+    if (fs.existsSync(localFile)) {
+      return { success: false, message: 'Local configuration already initialized.' };
+    }
+    try {
+      fs.mkdirSync(localDir, { recursive: true });
+      const defaultConfig: Config = {
+        cwd: '.',
+        includes: [],
+        excludes: ['node_modules', '.git', 'dist', '.modularization', 'backups'],
+        modules: [],
+        active_modules: []
+      };
+      fs.writeFileSync(localFile, JSON.stringify(defaultConfig, null, 2), 'utf-8');
+      return { success: true, message: `Local configuration initialized at ${localFile}` };
+    } catch (err: any) {
+      return { success: false, message: `Failed to initialize local config: ${err.message}` };
+    }
+  }
 
   static get(): Config {
     try {
-      if (!fs.existsSync(this.configFile)) {
+      const { configFile } = this.getPaths();
+      if (!fs.existsSync(configFile)) {
         return {};
       }
-      const data = fs.readFileSync(this.configFile, 'utf-8');
+      const data = fs.readFileSync(configFile, 'utf-8');
       return JSON.parse(data) as Config;
     } catch (err) {
       return {};
@@ -98,8 +128,9 @@ export class ConfigManager {
   }
   static set(newConfig: Config): void {
     try {
-      if (!fs.existsSync(this.configDir)) {
-        fs.mkdirSync(this.configDir, { recursive: true });
+      const { configDir, configFile } = this.getPaths();
+      if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
       }
 
       const currentConfig = this.get();
@@ -117,13 +148,13 @@ export class ConfigManager {
         updated.db = mergedDb;
       }
 
-      fs.writeFileSync(this.configFile, JSON.stringify(updated, null, 2), 'utf-8');
+      fs.writeFileSync(configFile, JSON.stringify(updated, null, 2), 'utf-8');
     } catch (err) {
       console.error('An error occurred while writing to the configuration file:', err);
     }
   }
 
   static getFilePath(): string {
-    return this.configFile;
+    return this.getPaths().configFile;
   }
 }
