@@ -26,18 +26,18 @@ export interface Config {
 
 export class ConfigManager {
   private static getPaths() {
-    const localDir = path.join(process.cwd(), '.modularization');
+    const localDir = path.join(process.cwd(), '.modulix');
     const localFile = path.join(localDir, 'config.json');
     if (fs.existsSync(localFile)) {
       return { configDir: localDir, configFile: localFile, isLocal: true };
     }
-    const globalDir = path.join(os.homedir(), '.modularization');
+    const globalDir = path.join(os.homedir(), '.modulix');
     const globalFile = path.join(globalDir, 'config.json');
     return { configDir: globalDir, configFile: globalFile, isLocal: false };
   }
 
   static initLocal(): { success: boolean; message: string } {
-    const localDir = path.join(process.cwd(), '.modularization');
+    const localDir = path.join(process.cwd(), '.modulix');
     const localFile = path.join(localDir, 'config.json');
     if (fs.existsSync(localFile)) {
       return { success: false, message: 'Local configuration already initialized.' };
@@ -47,7 +47,7 @@ export class ConfigManager {
       const defaultConfig: Config = {
         cwd: '.',
         includes: [],
-        excludes: ['node_modules', '.git', 'dist', '.modularization', 'backups'],
+        excludes: ['node_modules', '.git', 'dist', '.modulix', 'backups'],
         modules: [],
         active_modules: []
       };

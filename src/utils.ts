@@ -6,10 +6,18 @@ export async function readAllFiles(dirPath: string, includes: string[] = [], exc
     let files = await readdir(dirPath, { withFileTypes: true });
     let fileList: string[] = [];
     if (includes.length > 0) {
-        files = files.filter(file => includes.includes(file.name) || includes.includes(path.extname(file.name)));
+        files = files.filter(file => {
+            const ext = path.extname(file.name);
+            const extWithoutDot = ext.startsWith('.') ? ext.slice(1) : ext;
+            return includes.includes(file.name) || includes.includes(ext) || includes.includes(extWithoutDot);
+        });
     }
     if (excludes.length > 0) {
-        files = files.filter(file => !excludes.includes(file.name) && !excludes.includes(path.extname(file.name)));
+        files = files.filter(file => {
+            const ext = path.extname(file.name);
+            const extWithoutDot = ext.startsWith('.') ? ext.slice(1) : ext;
+            return !excludes.includes(file.name) && !excludes.includes(ext) && !excludes.includes(extWithoutDot);
+        });
     }
     await Promise.all(files.map(async (file) => {
         const filePath = path.join(dirPath, file.name);
@@ -92,6 +100,10 @@ export function extractBlockedContent(content: string): string {
                         blockStart = i - 1;
                     } else if (i >= 1 && content[i] === '*' && content[i - 1] === '/') {
                         blockStart = i - 1;
+                    } else if (i >= 0 && content[i] === '#') {
+                        blockStart = i;
+                    } else if (i >= 3 && content[i] === '-' && content[i - 1] === '-' && content[i - 2] === '!' && content[i - 3] === '<') {
+                        blockStart = i - 3;
                     }
 
                     let j = blockEnd;
@@ -100,6 +112,8 @@ export function extractBlockedContent(content: string): string {
                     }
                     if (j + 1 < content.length && content[j] === '*' && content[j + 1] === '/') {
                         blockEnd = j + 2;
+                    } else if (j + 2 < content.length && content[j] === '-' && content[j + 1] === '-' && content[j + 2] === '>') {
+                        blockEnd = j + 3;
                     }
 
                     blocks.push({ start: blockStart, end: blockEnd });
@@ -126,7 +140,17 @@ export function parseBlocks(content: string): Map<string, string> {
         const tagKey = `${moduleName}:${blockName}`;
 
         if (!isClosing) {
-            stack.push({ tagKey, contentStartIndex: match.index + fullTag.length });
+            let contentStartIndex = match.index + fullTag.length;
+            let j = contentStartIndex;
+            while (j < content.length && (content[j] === ' ' || content[j] === '\t')) {
+                j++;
+            }
+            if (j + 1 < content.length && content[j] === '*' && content[j + 1] === '/') {
+                contentStartIndex = j + 2;
+            } else if (j + 2 < content.length && content[j] === '-' && content[j + 1] === '-' && content[j + 2] === '>') {
+                contentStartIndex = j + 3;
+            }
+            stack.push({ tagKey, contentStartIndex });
         } else {
             const lastOpen = stack.pop();
             if (lastOpen && lastOpen.tagKey === tagKey) {
@@ -139,6 +163,10 @@ export function parseBlocks(content: string): Map<string, string> {
                     closingCommentStart = i - 1;
                 } else if (i >= 1 && content[i] === '*' && content[i - 1] === '/') {
                     closingCommentStart = i - 1;
+                } else if (i >= 0 && content[i] === '#') {
+                    closingCommentStart = i;
+                } else if (i >= 3 && content[i] === '-' && content[i - 1] === '-' && content[i - 2] === '!' && content[i - 3] === '<') {
+                    closingCommentStart = i - 3;
                 }
 
                 let indentStart = closingCommentStart;
@@ -173,10 +201,20 @@ export function syncBlocksInContent(
         const tagKey = `${moduleName}:${blockName}`;
 
         if (!isClosing) {
+            let contentStartIndex = match.index + fullTag.length;
+            let j = contentStartIndex;
+            while (j < content.length && (content[j] === ' ' || content[j] === '\t')) {
+                j++;
+            }
+            if (j + 1 < content.length && content[j] === '*' && content[j + 1] === '/') {
+                contentStartIndex = j + 2;
+            } else if (j + 2 < content.length && content[j] === '-' && content[j + 1] === '-' && content[j + 2] === '>') {
+                contentStartIndex = j + 3;
+            }
             stack.push({
                 tagKey,
                 moduleName,
-                contentStartIndex: match.index + fullTag.length,
+                contentStartIndex,
             });
         } else {
             const lastOpen = stack.pop();
@@ -191,6 +229,10 @@ export function syncBlocksInContent(
                         closingCommentStart = i - 1;
                     } else if (i >= 1 && content[i] === '*' && content[i - 1] === '/') {
                         closingCommentStart = i - 1;
+                    } else if (i >= 0 && content[i] === '#') {
+                        closingCommentStart = i;
+                    } else if (i >= 3 && content[i] === '-' && content[i - 1] === '-' && content[i - 2] === '!' && content[i - 3] === '<') {
+                        closingCommentStart = i - 3;
                     }
 
                     let indentStart = closingCommentStart;
@@ -240,4 +282,74 @@ export function syncBlocksInContent(
     }
 
     return updatedContent;
+}
+
+export interface BlockChange {
+  tag: string;
+  status: 'created' | 'diff' | 'deleted';
+}
+
+export function getFileLevelModuleTag(content: string): string | null {
+  const firstLine = content.split('\n')[0].trim();
+  const match = firstLine.match(/^(?:\/\/\s*|#\s*|<!--\s*|\/\*\s*)?@@([\w-]+)/);
+  return match ? match[1] : null;
+}
+
+export function getBlockChanges(
+  originalContent: string,
+  updatedContent: string,
+  templateBlocks: Map<string, string>,
+  activeModules: string[]
+): BlockChange[] {
+  const originalBlocks = parseBlocks(originalContent);
+  const updatedBlocks = parseBlocks(updatedContent);
+
+  const changes: BlockChange[] = [];
+  const allKeys = new Set([...originalBlocks.keys(), ...templateBlocks.keys()]);
+
+  for (const tagKey of allKeys) {
+    const [moduleName, blockName] = tagKey.split(':');
+    const tagStr = `@${moduleName} ${blockName}`;
+
+    const originalVal = originalBlocks.get(tagKey) || '';
+    const updatedVal = updatedBlocks.get(tagKey) || '';
+
+    const originalTrimmed = originalVal.trim();
+    const updatedTrimmed = updatedVal.trim();
+
+    if (originalTrimmed === updatedTrimmed) {
+      continue;
+    }
+
+    if (originalTrimmed.length === 0 && updatedTrimmed.length > 0) {
+      changes.push({ tag: tagStr, status: 'created' });
+    } else if (originalTrimmed.length > 0 && updatedTrimmed.length === 0) {
+      changes.push({ tag: tagStr, status: 'deleted' });
+    } else if (originalTrimmed.length > 0 && updatedTrimmed.length > 0 && originalTrimmed !== updatedTrimmed) {
+      changes.push({ tag: tagStr, status: 'diff' });
+    }
+  }
+
+  return changes;
+}
+
+
+
+export function formatSize(bytes: number): string {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+export function formatDate(date: Date): string {
+  const pad = (num: number) => String(num).padStart(2, '0');
+  const day = pad(date.getDate());
+  const month = pad(date.getMonth() + 1);
+  const year = date.getFullYear();
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  const seconds = pad(date.getSeconds());
+  return `${day}.${month}.${year} ${hours}:${minutes}:${seconds}`;
 }

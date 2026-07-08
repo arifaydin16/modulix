@@ -1,10 +1,8 @@
 import { Command } from 'commander';
 import { intro, outro, spinner, text, select, isCancel, cancel, multiselect } from '@clack/prompts';
 import pc from 'picocolors';
-import { ConfigManager, TemplateManager } from './index.js';
-import process, { config } from 'node:process';
-import { readAllFiles, validateModuleTags, parseBlocks, syncBlocksInContent } from './utils.js';
-import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { ConfigManager, TemplateManager, BackupManager, ModuleManager, formatDate, formatSize } from './index.js';
+import process from 'node:process';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 
@@ -19,6 +17,9 @@ program
 const configCmd = program
   .command('config')
   .description('Manage configuration settings');
+const backupCmd = program
+  .command('backup')
+  .description('Manage backup configurations');
 const modulesCmd = program
   .command('modules')
   .description('Manage module configurations');
@@ -27,34 +28,238 @@ const setCmd = configCmd
   .command('set')
   .description('Set a configuration parameter');
 
+backupCmd.command('list')
+  .description('List all backups with details')
+  .action(() => {
+    intro(pc.cyan(' modulix backup list '));
+    const list = BackupManager.list();
+    if (list.length === 0) {
+      outro(pc.yellow('No backups found.'));
+    } else {
+      const listStr = list.map(b => {
+        return `  - ${pc.bold(b.name)} (Date: ${formatDate(b.birthtime)}, Size: ${formatSize(b.size)})`;
+      }).join('\n');
+      outro(pc.green(`Available Backups:\n${listStr}`));
+    }
+  });
+
+backupCmd.command('create')
+  .argument('[name]', 'Backup name')
+  .description('Create a new backup')
+  .action(async (name) => {
+    intro(pc.cyan(' modulix backup create '));
+    const s = spinner();
+    s.start('Creating backup...');
+    const result = await BackupManager.create(name);
+    if (result.success) {
+      s.stop(pc.green(result.message));
+      outro(pc.green('🎉 Backup created successfully!'));
+    } else {
+      s.stop(pc.red(result.message));
+      outro(pc.red('❌ Could not create backup.'));
+      process.exit(1);
+    }
+  });
+
+backupCmd.command('remove')
+  .argument('[name]', 'Backup name')
+  .description('Remove a backup or select from list to remove')
+  .action(async (name) => {
+    intro(pc.cyan(' modulix backup remove '));
+
+    if (name) {
+      const s = spinner();
+      s.start(`Removing backup "${name}"...`);
+      const result = await BackupManager.remove([name]);
+      if (result.successCount > 0) {
+        s.stop(pc.green(`Backup "${name}" removed successfully.`));
+        outro(pc.green('🎉 Backup removed.'));
+      } else {
+        s.stop(pc.red(`Failed to remove backup "${name}". It might not exist.`));
+        outro(pc.red('❌ Could not remove backup.'));
+        process.exit(1);
+      }
+    } else {
+      const list = BackupManager.list();
+      if (list.length === 0) {
+        outro(pc.yellow('No backups found to remove.'));
+        return;
+      }
+
+      const selectResult = await multiselect({
+        message: 'Select backups you want to delete:',
+        options: list.map(b => ({
+          value: b.name,
+          label: `${b.name} (${formatDate(b.birthtime)} - ${formatSize(b.size)})`
+        })),
+        required: false,
+      });
+
+      if (isCancel(selectResult) || typeof selectResult === 'symbol') {
+        outro(pc.red('Operation canceled.'));
+        process.exit(0);
+      }
+
+      const selectedBackups = selectResult as string[];
+      if (selectedBackups.length === 0) {
+        outro(pc.yellow('No backups selected for deletion.'));
+        return;
+      }
+
+      const s = spinner();
+      s.start('Deleting selected backups...');
+      const result = await BackupManager.remove(selectedBackups);
+      s.stop(`Number of deleted backups: ${result.successCount}`);
+
+      if (result.failed.length > 0) {
+        outro(pc.red(`Could not delete backups: ${result.failed.join(', ')}`));
+      } else {
+        outro(pc.green('🎉 All selected backups deleted successfully!'));
+      }
+    }
+  });
+
+backupCmd.command('status')
+  .argument('[name]', 'Backup name')
+  .description('Compare project files with the selected backup')
+  .action(async (name) => {
+    intro(pc.cyan(' modulix backup status '));
+
+    let backupName = name;
+    if (!backupName) {
+      const list = BackupManager.list();
+      if (list.length === 0) {
+        outro(pc.yellow('No backups found.'));
+        return;
+      }
+
+      const selectResult = await select({
+        message: 'Select a backup to compare:',
+        options: list.map(b => ({
+          value: b.name,
+          label: `${b.name} (${formatDate(b.birthtime)} - ${formatSize(b.size)})`
+        }))
+      });
+
+      if (isCancel(selectResult) || typeof selectResult === 'symbol') {
+        outro(pc.red('Operation canceled.'));
+        process.exit(0);
+      }
+      backupName = selectResult as string;
+    }
+
+    const s = spinner();
+    s.start(`Comparing project files with backup "${backupName}"...`);
+    const result = await BackupManager.status(backupName);
+    if (!result.success) {
+      s.stop(pc.red(result.message));
+      outro(pc.red('❌ Could not compare backup.'));
+      process.exit(1);
+    }
+
+    s.stop(`Comparison complete!`);
+
+    for (const f of result.files) {
+      let statusStr = '';
+      if (f.status === 'backed_up') {
+        statusStr = pc.green('(backed up)');
+      } else if (f.status === 'diff') {
+        statusStr = pc.yellow('(diff)');
+      } else if (f.status === 'no_backup') {
+        statusStr = pc.red('(no backup)');
+      }
+      console.log(`  ${f.relativePath} ${statusStr}`);
+    }
+
+    outro(pc.green('🎉 Backup status comparison completed.'));
+  });
+
+backupCmd.command('swap')
+  .argument('[name]', 'Backup name')
+  .description('Delete all project files and restore from the selected backup')
+  .action(async (name) => {
+    intro(pc.cyan(' modulix backup swap '));
+
+    let backupName = name;
+    if (!backupName) {
+      const list = BackupManager.list();
+      if (list.length === 0) {
+        outro(pc.yellow('No backups found.'));
+        return;
+      }
+
+      const selectResult = await select({
+        message: 'Select a backup to restore/swap to:',
+        options: list.map(b => ({
+          value: b.name,
+          label: `${b.name} (${formatDate(b.birthtime)} - ${formatSize(b.size)})`
+        }))
+      });
+
+      if (isCancel(selectResult) || typeof selectResult === 'symbol') {
+        outro(pc.red('Operation canceled.'));
+        process.exit(0);
+      }
+      backupName = selectResult as string;
+    } else {
+      const backupsDir = BackupManager.getBackupsDir();
+      const targetDir = path.join(backupsDir, backupName);
+      if (!existsSync(targetDir)) {
+        outro(pc.red(`Error: Backup with name "${backupName}" does not exist.`));
+        process.exit(1);
+      }
+    }
+
+    const confirmInput = await text({
+      message: `Please type "confirm" to delete project files and restore from "${backupName}":`,
+      validate(value) {
+        if (value.trim() !== 'confirm') {
+          return 'You must type "confirm" to proceed!';
+        }
+      }
+    });
+
+    if (isCancel(confirmInput) || typeof confirmInput === 'symbol') {
+      outro(pc.red('Operation canceled.'));
+      process.exit(0);
+    }
+
+    const s = spinner();
+    s.start(`Swapping project files with backup "${backupName}"...`);
+    const result = await BackupManager.swap(backupName);
+    if (result.success) {
+      s.stop(pc.green(result.message));
+      outro(pc.green('🎉 Backup swap completed successfully!'));
+    } else {
+      s.stop(pc.red(result.message));
+      outro(pc.red('❌ Could not swap backup.'));
+      process.exit(1);
+    }
+  });
 
 modulesCmd.command('clear')
   .description('Clear all configured modules')
   .action(() => {
-    ConfigManager.setModules([]);
+    ModuleManager.clear();
     outro(pc.green(`All modules have been cleared from configuration. (${ConfigManager.getFilePath()})`));
   });
+
 modulesCmd.command('remove')
   .description('Remove specific modules from the configuration')
   .action(async () => {
-    const config = ConfigManager.get();
-    const modules = config.modules || [];
-    if (modules.length === 0) {
+    const list = ModuleManager.list();
+    if (list.length === 0) {
       outro(pc.yellow('No modules configured.'));
       return;
     }
 
     const selectResult = await multiselect({
       message: 'Select modules to remove:',
-      options: modules.map(module => ({ value: module, label: module })),
+      options: list.map(module => ({ value: module.name, label: module.name })),
       required: false,
     });
 
-    if (isCancel(selectResult)) {
-      cancel('Operation canceled by the user.');
-      process.exit(0);
-    }
-    if (typeof selectResult === 'symbol') {
+    if (isCancel(selectResult) || typeof selectResult === 'symbol') {
       cancel('Operation canceled by the user.');
       process.exit(0);
     }
@@ -65,30 +270,28 @@ modulesCmd.command('remove')
       return;
     }
 
-    const updatedModules = modules.filter(module => !selectedModules.includes(module));
-    ConfigManager.setModules(updatedModules);
-
+    ModuleManager.remove(selectedModules);
     outro(pc.green(`Modules removed from configuration: ${selectedModules.join(', ')} (${ConfigManager.getFilePath()})`));
   });
+
 modulesCmd.command('list')
   .description('List all configured modules')
   .action(() => {
-    const config = ConfigManager.get();
-    const modules = config.modules || [];
-    const active = config.active_modules || [];
-    if (modules.length === 0) {
+    const list = ModuleManager.list();
+    if (list.length === 0) {
       outro(pc.yellow('No modules configured.'));
     } else {
-      const listStr = modules.map(m => {
-        if (active.includes(m)) {
-          return pc.green(`${m} (active)`);
+      const listStr = list.map(m => {
+        if (m.active) {
+          return pc.green(`${m.name} (active)`);
         } else {
-          return pc.red(`${m} (disabled)`);
+          return pc.red(`${m.name} (disabled)`);
         }
       }).join(', ');
       outro(`Configured modules: ${listStr}`);
     }
   });
+
 modulesCmd.command('add')
   .description('Add modules to the configuration')
   .action(async () => {
@@ -112,28 +315,30 @@ modulesCmd.command('add')
       process.exit(1);
     }
 
-    ConfigManager.addModules(moduleNames);
-
+    ModuleManager.add(moduleNames);
     outro(pc.green(`Modules successfully added to configuration: ${moduleNames.join(', ')} (${ConfigManager.getFilePath()})`));
-  }
-  );
+  });
+
 modulesCmd.command('enable')
   .argument('<module>', 'Module name')
   .description('Enable a module')
   .action((moduleName) => {
-    ConfigManager.enableModule(moduleName);
+    ModuleManager.enable(moduleName);
     outro(pc.green(`Module "${moduleName}" has been enabled.`));
   });
+
 modulesCmd.command('disable')
   .argument('<module>', 'Module name')
   .description('Disable a module')
   .action((moduleName) => {
-    ConfigManager.disableModule(moduleName);
+    ModuleManager.disable(moduleName);
     outro(pc.green(`Module "${moduleName}" has been disabled.`));
   });
+
 modulesCmd.command('sync')
+  .argument('[templateName]', 'Template name')
   .description('Synchronize module folders')
-  .action(async () => {
+  .action(async (templateName) => {
     const config = ConfigManager.get();
     if (config.cwd === undefined) {
       outro(pc.red('Error: Please define cwd (project root directory) in configuration before synchronizing folders. \nmdl config set cwd --path <your_project_root_directory>'));
@@ -146,27 +351,28 @@ modulesCmd.command('sync')
       process.exit(1);
     }
 
-    const formatDate = (date: Date) => {
-      const pad = (num: number) => String(num).padStart(2, '0');
-      const day = pad(date.getDate());
-      const month = pad(date.getMonth() + 1);
-      const year = date.getFullYear();
-      const hours = pad(date.getHours());
-      const minutes = pad(date.getMinutes());
-      return `${day}.${month}.${year} ${hours}:${minutes}`;
-    };
 
-    const selectedTemplateName = await select({
-      message: 'Select a template:',
-      options: templates.map(t => ({
-        value: t.name,
-        label: `${t.name} (Created At: ${formatDate(t.birthtime)})`
-      }))
-    });
+    let selectedTemplateName = templateName;
+    if (!selectedTemplateName) {
+      const selectedTemplateNameResult = await select({
+        message: 'Select a template:',
+        options: templates.map(t => ({
+          value: t.name,
+          label: `${t.name} (Created At: ${formatDate(t.birthtime)})`
+        }))
+      });
 
-    if (isCancel(selectedTemplateName) || typeof selectedTemplateName === 'symbol') {
-      cancel('Operation canceled.');
-      process.exit(0);
+      if (isCancel(selectedTemplateNameResult) || typeof selectedTemplateNameResult === 'symbol') {
+        cancel('Operation canceled.');
+        process.exit(0);
+      }
+      selectedTemplateName = selectedTemplateNameResult as string;
+    } else {
+      const templatesList = TemplateManager.list();
+      if (!templatesList.includes(selectedTemplateName)) {
+        outro(pc.red(`Error: Template "${selectedTemplateName}" not found.`));
+        process.exit(1);
+      }
     }
 
     let backupName = '';
@@ -191,55 +397,50 @@ modulesCmd.command('sync')
     const s = spinner();
     s.start('Synchronizing module files...');
 
-    try {
-      const backupRoot = path.join(process.cwd(), 'backups');
-      const includes = config.includes || [];
-      const excludes = config.excludes && config.excludes.length > 0
-        ? config.excludes
-        : ['node_modules', '.git', 'dist', '.modularization', 'backups'];
-
-      const files = await readAllFiles(config.cwd!, includes, excludes);
-      const activeModules = config.active_modules || [];
-      const templateDir = path.join(TemplateManager.getTemplatesDir(), selectedTemplateName as string);
-
-      let updatedFilesCount = 0;
-
-      for (const file of files) {
-        const content = await readFile(file, 'utf-8');
-        const relativePath = path.relative(config.cwd!, file);
-
-        validateModuleTags(content, file);
-
-        if (config.backupBeforeSync && backupName) {
-          const backupFilePath = path.join(backupRoot, backupName, relativePath);
-          await mkdir(path.dirname(backupFilePath), { recursive: true });
-          await writeFile(backupFilePath, content, 'utf-8');
-        }
-
-        const templateFilePath = path.join(templateDir, relativePath);
-        let templateBlocks = new Map<string, string>();
-
-        if (existsSync(templateFilePath)) {
-          const templateContent = await readFile(templateFilePath, 'utf-8');
-          templateBlocks = parseBlocks(templateContent);
-        }
-
-        const updatedContent = syncBlocksInContent(content, templateBlocks, activeModules);
-
-        if (updatedContent !== content) {
-          await writeFile(file, updatedContent, 'utf-8');
-          updatedFilesCount++;
-        }
-      }
-
-      s.stop(`Synchronization complete! Number of updated files: ${updatedFilesCount}`);
-      outro(pc.green('🎉 Synchronization completed successfully.'));
-    } catch (err: any) {
-      s.stop(`Error: ${err.message}`);
+    const result = await ModuleManager.sync(selectedTemplateName, backupName);
+    if (!result.success) {
+      s.stop(`Error: ${result.message}`);
       outro(pc.red('❌ Synchronization could not be completed.'));
       process.exit(1);
     }
-  })
+
+    const reports = result.reports;
+    if (reports.length === 0) {
+      s.stop('Synchronization complete! No changes made.');
+    } else {
+      s.stop(`Synchronization complete! ${reports.length} files processed.`);
+      console.log('\nSync Details:');
+      for (const r of reports) {
+        let fileStatusStr = '';
+        if (r.status === 'created') {
+          fileStatusStr = pc.green('(created)');
+        } else if (r.status === 'deleted') {
+          fileStatusStr = pc.red('(deleted)');
+        } else if (r.status === 'diff') {
+          fileStatusStr = pc.yellow('(diff)');
+        }
+
+        console.log(`  ${r.relativePath} ${fileStatusStr}`);
+
+        if (r.status === 'diff' && r.blockChanges && r.blockChanges.length > 0) {
+          for (const bc of r.blockChanges) {
+            let blockStatusStr = '';
+            if (bc.status === 'created') {
+              blockStatusStr = pc.green('(created)');
+            } else if (bc.status === 'deleted') {
+              blockStatusStr = pc.red('(deleted)');
+            } else if (bc.status === 'diff') {
+              blockStatusStr = pc.yellow('(diff)');
+            }
+            console.log(`    - ${bc.tag} ${blockStatusStr}`);
+          }
+        }
+      }
+      console.log(''); // empty line
+    }
+
+    outro(pc.green('🎉 Synchronization completed successfully.'));
+  });
 
 setCmd
   .command('db')
@@ -436,7 +637,6 @@ excludesCmd.command('remove')
     ConfigManager.removeExcludes(item);
     outro(pc.green(`"${item}" has been removed from excludes. (${ConfigManager.getFilePath()})`));
   });
-
 configCmd.command('show')
   .description('Show current configuration')
   .action(() => {
@@ -446,7 +646,6 @@ configCmd.command('show')
     outro(pc.green(`Configuration path: ${ConfigManager.getFilePath()}`));
   });
 
-// init command
 program
   .command('init')
   .description('Initialize local configuration in the current directory')
