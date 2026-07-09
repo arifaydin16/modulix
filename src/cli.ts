@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { intro, outro, spinner, text, select, isCancel, cancel, multiselect } from '@clack/prompts';
 import pc from 'picocolors';
-import { ConfigManager, TemplateManager, BackupManager, ModuleManager, formatDate, formatSize } from './index.js';
+import { ConfigManager, TemplateManager, BackupManager, ModuleManager, DatabaseManager, formatDate, formatSize } from './index.js';
 import process from 'node:process';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
@@ -23,6 +23,9 @@ const backupCmd = program
 const modulesCmd = program
   .command('modules')
   .description('Manage module configurations');
+const dbCmd = program
+  .command('db')
+  .description('Manage database backups, templates and synchronization');
 
 const setCmd = configCmd
   .command('set')
@@ -446,16 +449,28 @@ setCmd
   .command('db')
   .description('Set database connection settings')
   .option('-d, --database <type>', 'Database selection (postgresql, mysql)')
+  .option('--host <host>', 'Database host')
+  .option('-n, --name <name>', 'Database name')
   .option('-p, --port <number>', 'Port number')
   .option('-u, --user <username>', 'User name')
   .option('-pass, --password <password>', 'Password')
+  .option('--mysqldump-path <path>', 'Path to mysqldump executable')
+  .option('--mysql-path <path>', 'Path to mysql executable')
+  .option('--pg-dump-path <path>', 'Path to pg_dump executable')
+  .option('--psql-path <path>', 'Path to psql executable')
   .action(async (options) => {
     intro(pc.cyan(' mdl config set db '));
 
     let database = options.database;
+    let host = options.host;
+    let dbName = options.name;
     let port = options.port;
     let user = options.user;
     let password = options.password;
+    let mysqldumpPath = options.mysqldumpPath;
+    let mysqlPath = options.mysqlPath;
+    let pgDumpPath = options.pgDumpPath;
+    let psqlPath = options.psqlPath;
 
     if (!database) {
       const selectResult = await select({
@@ -479,6 +494,34 @@ setCmd
       }
     }
 
+    if (!host) {
+      const hostResult = await text({
+        message: 'Host (Default: localhost):',
+        placeholder: 'localhost',
+      });
+
+      if (typeof hostResult === 'symbol') {
+        outro(pc.red('Operation canceled.'));
+        process.exit(0);
+      }
+      host = ((hostResult || '') as string).trim() === '' ? 'localhost' : hostResult;
+    }
+
+    if (!dbName) {
+      const nameResult = await text({
+        message: 'Database Name:',
+        validate(value) {
+          if (value.trim().length === 0) return 'Database name cannot be empty!';
+        },
+      });
+
+      if (typeof nameResult === 'symbol') {
+        outro(pc.red('Operation canceled.'));
+        process.exit(0);
+      }
+      dbName = nameResult;
+    }
+
     const defaultPort = database === 'postgresql' ? '5432' : '3306';
 
     if (!port) {
@@ -496,7 +539,7 @@ setCmd
         outro(pc.red('Operation canceled.'));
         process.exit(0);
       }
-      port = (portResult as string).trim() === '' ? Number(defaultPort) : Number(portResult);
+      port = ((portResult || '').toString() == '' || !portResult) ? Number(defaultPort) : Number(portResult);
     } else {
       port = Number(port);
       if (isNaN(port)) {
@@ -534,14 +577,75 @@ setCmd
       password = passResult;
     }
 
-    ConfigManager.set({
-      db: {
-        database: database as 'postgresql' | 'mysql',
-        port: Number(port),
-        user,
-        password,
-      },
-    });
+    if (database === 'mysql') {
+      if (!mysqldumpPath) {
+        const dumpPathResult = await text({
+          message: 'Mysqldump Path (Optional, leave blank to use default):',
+          placeholder: 'mysqldump',
+        });
+
+        if (typeof dumpPathResult === 'symbol') {
+          outro(pc.red('Operation canceled.'));
+          process.exit(0);
+        }
+        mysqldumpPath = dumpPathResult.trim() === '' ? undefined : dumpPathResult;
+      }
+
+      if (!mysqlPath) {
+        const sqlPathResult = await text({
+          message: 'Mysql Path (Optional, leave blank to use default):',
+          placeholder: 'mysql',
+        });
+
+        if (typeof sqlPathResult === 'symbol') {
+          outro(pc.red('Operation canceled.'));
+          process.exit(0);
+        }
+        mysqlPath = sqlPathResult.trim() === '' ? undefined : sqlPathResult;
+      }
+    } else if (database === 'postgresql') {
+      if (!pgDumpPath) {
+        const dumpPathResult = await text({
+          message: 'Pg_dump Path (Optional, leave blank to use default):',
+          placeholder: 'pg_dump',
+        });
+
+        if (typeof dumpPathResult === 'symbol') {
+          outro(pc.red('Operation canceled.'));
+          process.exit(0);
+        }
+        pgDumpPath = dumpPathResult.trim() === '' ? undefined : dumpPathResult;
+      }
+
+      if (!psqlPath) {
+        const psqlPathResult = await text({
+          message: 'Psql Path (Optional, leave blank to use default):',
+          placeholder: 'psql',
+        });
+
+        if (typeof psqlPathResult === 'symbol') {
+          outro(pc.red('Operation canceled.'));
+          process.exit(0);
+        }
+        psqlPath = psqlPathResult.trim() === '' ? undefined : psqlPathResult;
+      }
+    }
+
+    const dbConfig: any = {
+      provider: database as 'postgresql' | 'mysql',
+      host,
+      database: dbName,
+      port: Number(port),
+      user,
+      password,
+    };
+
+    if (mysqldumpPath) dbConfig.mysqldumpPath = mysqldumpPath;
+    if (mysqlPath) dbConfig.mysqlPath = mysqlPath;
+    if (pgDumpPath) dbConfig.pgDumpPath = pgDumpPath;
+    if (psqlPath) dbConfig.psqlPath = psqlPath;
+
+    ConfigManager.set({ db: dbConfig });
 
     outro(pc.green(`Database informations saved! (${ConfigManager.getFilePath()})`));
   });
@@ -737,6 +841,245 @@ templatesCmd
       outro(pc.red(`Could not delete templates: ${result.failed.join(', ')}`));
     } else {
       outro(pc.green('🎉 All selected templates deleted successfully!'));
+    }
+  });
+
+const dbBackupCmd = dbCmd
+  .command('backup')
+  .description('Manage database backups');
+
+dbBackupCmd.command('create')
+  .argument('[name]', 'Backup name')
+  .description('Create a new database backup')
+  .action(async (name) => {
+    intro(pc.cyan(' modulix db backup create '));
+    const s = spinner();
+    s.start('Creating database backup...');
+    const result = await DatabaseManager.createBackup(name);
+    if (result.success) {
+      s.stop(pc.green(result.message));
+      outro(pc.green('🎉 Database backup created successfully!'));
+    } else {
+      s.stop(pc.red(result.message));
+      outro(pc.red(`❌ Could not create database backup: ${result.message}`));
+      process.exit(1);
+    }
+  });
+
+dbBackupCmd.command('list')
+  .description('List all database backups')
+  .action(() => {
+    intro(pc.cyan(' modulix db backup list '));
+    const list = DatabaseManager.listBackups();
+    if (list.length === 0) {
+      outro(pc.yellow('No database backups found.'));
+    } else {
+      const listStr = list.map(b => {
+        return `  - ${pc.bold(b.name)} (Date: ${formatDate(b.birthtime)}, Size: ${formatSize(b.size)})`;
+      }).join('\n');
+      outro(pc.green(`Available Database Backups:\n${listStr}`));
+    }
+  });
+
+dbBackupCmd.command('remove')
+  .argument('[name]', 'Backup name')
+  .description('Remove a database backup')
+  .action(async (name) => {
+    intro(pc.cyan(' modulix db backup remove '));
+
+    if (name) {
+      const s = spinner();
+      s.start(`Removing database backup "${name}"...`);
+      const result = await DatabaseManager.removeBackups([name]);
+      if (result.successCount > 0) {
+        s.stop(pc.green(`Database backup "${name}" removed successfully.`));
+        outro(pc.green('🎉 Database backup removed.'));
+      } else {
+        s.stop(pc.red(`Failed to remove database backup "${name}".`));
+        outro(pc.red('❌ Could not remove database backup.'));
+        process.exit(1);
+      }
+    } else {
+      const list = DatabaseManager.listBackups();
+      if (list.length === 0) {
+        outro(pc.yellow('No database backups found to remove.'));
+        return;
+      }
+
+      const selectResult = await multiselect({
+        message: 'Select database backups you want to delete:',
+        options: list.map(b => ({
+          value: b.name,
+          label: `${b.name} (${formatDate(b.birthtime)} - ${formatSize(b.size)})`
+        })),
+        required: false,
+      });
+
+      if (isCancel(selectResult) || typeof selectResult === 'symbol') {
+        outro(pc.red('Operation canceled.'));
+        process.exit(0);
+      }
+
+      const selectedBackups = selectResult as string[];
+      if (selectedBackups.length === 0) {
+        outro(pc.yellow('No database backups selected for deletion.'));
+        return;
+      }
+
+      const s = spinner();
+      s.start('Deleting selected database backups...');
+      const result = await DatabaseManager.removeBackups(selectedBackups);
+      s.stop(`Deleted ${result.successCount} database backups.`);
+      if (result.failed.length > 0) {
+        outro(pc.red(`Could not delete: ${result.failed.join(', ')}`));
+      } else {
+        outro(pc.green('🎉 All selected database backups deleted successfully!'));
+      }
+    }
+  });
+
+dbBackupCmd.command('swap')
+  .argument('[name]', 'Backup name')
+  .description('Restore database schema + data from backup')
+  .action(async (name) => {
+    intro(pc.cyan(' modulix db backup swap '));
+
+    let backupName = name;
+    if (!backupName) {
+      const list = DatabaseManager.listBackups();
+      if (list.length === 0) {
+        outro(pc.yellow('No database backups found.'));
+        return;
+      }
+
+      const selectResult = await select({
+        message: 'Select a database backup to restore/swap to:',
+        options: list.map(b => ({
+          value: b.name,
+          label: `${b.name} (${formatDate(b.birthtime)} - ${formatSize(b.size)})`
+        }))
+      });
+
+      if (isCancel(selectResult) || typeof selectResult === 'symbol') {
+        outro(pc.red('Operation canceled.'));
+        process.exit(0);
+      }
+      backupName = selectResult as string;
+    }
+
+    const confirmInput = await text({
+      message: `Please type "confirm" to reset the database and restore from "${backupName}":`,
+      validate(value) {
+        if (value.trim() !== 'confirm') {
+          return 'You must type "confirm" to proceed!';
+        }
+      }
+    });
+
+    if (isCancel(confirmInput) || typeof confirmInput === 'symbol') {
+      outro(pc.red('Operation canceled.'));
+      process.exit(0);
+    }
+
+    const s = spinner();
+    s.start(`Swapping database with backup "${backupName}"...`);
+    const result = await DatabaseManager.swapBackup(backupName);
+    if (result.success) {
+      s.stop(pc.green(result.message));
+      outro(pc.green('🎉 Database backup swap completed successfully!'));
+    } else {
+      s.stop(pc.red(result.message));
+      outro(pc.red('❌ Could not swap database backup.'));
+      process.exit(1);
+    }
+  });
+
+dbCmd.command('sync')
+  .argument('[templateName]', 'Template name')
+  .description('Synchronize database schema from template')
+  .action(async (templateName) => {
+    intro(pc.cyan(' modulix db sync '));
+
+    const config = ConfigManager.get();
+    if (!config.db || !config.db.provider || !config.db.database || !config.db.user) {
+      outro(pc.red('Error: Please set database connection details first: \nmdl config set db'));
+      process.exit(1);
+    }
+
+    const templates = TemplateManager.listWithDates();
+    if (templates.length === 0) {
+      outro(pc.red('Error: No templates found. Please add a template first: \nmdl templates add <templateName>'));
+      process.exit(1);
+    }
+
+    let selectedTemplateName = templateName;
+    if (!selectedTemplateName) {
+      const selectedTemplateNameResult = await select({
+        message: 'Select a template:',
+        options: templates.map(t => ({
+          value: t.name,
+          label: `${t.name} (Created At: ${formatDate(t.birthtime)})`
+        }))
+      });
+
+      if (isCancel(selectedTemplateNameResult) || typeof selectedTemplateNameResult === 'symbol') {
+        outro(pc.red('Operation canceled.'));
+        process.exit(0);
+      }
+      selectedTemplateName = selectedTemplateNameResult as string;
+    } else {
+      const templatesList = TemplateManager.list();
+      if (!templatesList.includes(selectedTemplateName)) {
+        outro(pc.red(`Error: Template "${selectedTemplateName}" not found.`));
+        process.exit(1);
+      }
+    }
+
+    const templateDir = path.join(TemplateManager.getTemplatesDir(), selectedTemplateName);
+    let templateSqlPath = '';
+    const possiblePaths = [
+      path.join(templateDir, 'db', 'schema.sql'),
+      path.join(templateDir, 'schema.sql')
+    ];
+
+    for (const p of possiblePaths) {
+      if (existsSync(p)) {
+        templateSqlPath = p;
+        break;
+      }
+    }
+
+    let customSchemaPath: string | undefined;
+    if (!templateSqlPath) {
+      const askPath = await text({
+        message: `No database schema file (schema.sql or db/schema.sql) found in template "${selectedTemplateName}". Please enter the path to the schema SQL file:`,
+        validate(value) {
+          if (value.trim().length === 0) return 'Schema path cannot be empty!';
+          const resolved = path.isAbsolute(value) ? value : path.resolve(process.cwd(), value);
+          if (!existsSync(resolved)) {
+            return 'File does not exist at this path!';
+          }
+        }
+      });
+
+      if (isCancel(askPath) || typeof askPath === 'symbol') {
+        outro(pc.red('Operation canceled.'));
+        process.exit(0);
+      }
+      customSchemaPath = path.isAbsolute(askPath) ? askPath : path.resolve(process.cwd(), askPath);
+    }
+
+    const s = spinner();
+    s.start('Synchronizing database schema...');
+    const result = await DatabaseManager.sync(selectedTemplateName, customSchemaPath);
+
+    if (result.success) {
+      s.stop(pc.green(result.message));
+      outro(pc.green('🎉 Database schema synchronization completed successfully!'));
+    } else {
+      s.stop(pc.red(result.message));
+      outro(pc.red(`❌ Synchronization failed: ${result.message}`));
+      process.exit(1);
     }
   });
 

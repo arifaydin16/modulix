@@ -17,3 +17,4 @@ export * from './templates.js';
 export * from './utils.js';
 export * from './backup.js';
 export * from './module.js';
+export * from './database.js';

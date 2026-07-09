@@ -41,7 +41,7 @@ interface Stack {
 }
 
 export function validateModuleTags(content:string, filePath:string) {
-    const tagRegex = /@(!?)([\w-]+)\s+([\w-]+)/g;
+    const tagRegex = /@(!?)([\w-]+)[ \t]+([\w-]+)/g;
     const stack: Stack[] = [];
     let match;
 
@@ -70,7 +70,7 @@ export function validateModuleTags(content:string, filePath:string) {
 }
 
 export function extractBlockedContent(content: string): string {
-    const tagRegex = /@(!?)([\w-]+)\s+([\w-]+)/g;
+    const tagRegex = /@(!?)([\w-]+)[ \t]+([\w-]+)/g;
     const stack: { tagKey: string; index: number; fullTag: string }[] = [];
     const blocks: { start: number; end: number }[] = [];
     let match;
@@ -102,6 +102,8 @@ export function extractBlockedContent(content: string): string {
                         blockStart = i - 1;
                     } else if (i >= 0 && content[i] === '#') {
                         blockStart = i;
+                    } else if (i >= 1 && content[i] === '-' && content[i - 1] === '-') {
+                        blockStart = i - 1;
                     } else if (i >= 3 && content[i] === '-' && content[i - 1] === '-' && content[i - 2] === '!' && content[i - 3] === '<') {
                         blockStart = i - 3;
                     }
@@ -130,7 +132,7 @@ export function extractBlockedContent(content: string): string {
 }
 
 export function parseBlocks(content: string): Map<string, string> {
-    const tagRegex = /@(!?)([\w-]+)\s+([\w-]+)/g;
+    const tagRegex = /@(!?)([\w-]+)[ \t]+([\w-]+)/g;
     const stack: { tagKey: string; contentStartIndex: number }[] = [];
     const blocksMap = new Map<string, string>();
     let match;
@@ -165,6 +167,8 @@ export function parseBlocks(content: string): Map<string, string> {
                     closingCommentStart = i - 1;
                 } else if (i >= 0 && content[i] === '#') {
                     closingCommentStart = i;
+                } else if (i >= 1 && content[i] === '-' && content[i - 1] === '-') {
+                    closingCommentStart = i - 1;
                 } else if (i >= 3 && content[i] === '-' && content[i - 1] === '-' && content[i - 2] === '!' && content[i - 3] === '<') {
                     closingCommentStart = i - 3;
                 }
@@ -191,7 +195,7 @@ export function syncBlocksInContent(
     templateBlocks: Map<string, string>,
     activeModules: string[]
 ): string {
-    const tagRegex = /@(!?)([\w-]+)\s+([\w-]+)/g;
+    const tagRegex = /@(!?)([\w-]+)[ \t]+([\w-]+)/g;
     const stack: { tagKey: string; moduleName: string; contentStartIndex: number }[] = [];
     const replacements: { start: number; end: number; newContent: string }[] = [];
     let match;
@@ -231,6 +235,8 @@ export function syncBlocksInContent(
                         closingCommentStart = i - 1;
                     } else if (i >= 0 && content[i] === '#') {
                         closingCommentStart = i;
+                    } else if (i >= 1 && content[i] === '-' && content[i - 1] === '-') {
+                        closingCommentStart = i - 1;
                     } else if (i >= 3 && content[i] === '-' && content[i - 1] === '-' && content[i - 2] === '!' && content[i - 3] === '<') {
                         closingCommentStart = i - 3;
                     }
@@ -291,7 +297,7 @@ export interface BlockChange {
 
 export function getFileLevelModuleTag(content: string): string | null {
   const firstLine = content.split('\n')[0].trim();
-  const match = firstLine.match(/^(?:\/\/\s*|#\s*|<!--\s*|\/\*\s*)?@@([\w-]+)/);
+  const match = firstLine.match(/^(?:\/\/\s*|#\s*|--\s*|<!--\s*|\/\*\s*)?@@([\w-]+)/);
   return match ? match[1] : null;
 }
 

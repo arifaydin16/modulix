@@ -3,10 +3,16 @@ import path from 'path';
 import os from 'os';
 
 export interface DatabaseConfig {
-  database?: 'postgresql' | 'mysql';
+  provider?: 'postgresql' | 'mysql';
+  host?: string;
+  database?: string;
   port?: number;
   user?: string;
   password?: string;
+  mysqldumpPath?: string;
+  mysqlPath?: string;
+  pgDumpPath?: string;
+  psqlPath?: string;
 }
 
 export interface Folder {
