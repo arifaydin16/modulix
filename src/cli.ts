@@ -439,7 +439,7 @@ modulesCmd.command('sync')
           }
         }
       }
-      console.log(''); // empty line
+      console.log('');
     }
 
     outro(pc.green('🎉 Synchronization completed successfully.'));

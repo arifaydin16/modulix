@@ -1,124 +1,372 @@
 # Modulix CLI
 
-<!-- [![npm version](https://img.shields.io/badge/npm-1.0.0-blue.svg)](https://www.npmjs.com/) -->
 [![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](https://opensource.org/licenses/ISC)
 
-**Modulix** is a modern, lightweight global CLI and programmatic Node.js library designed to dynamically enable, disable, and synchronize feature-based code blocks across your codebase. 
+**Modulix** is a modern, lightweight global CLI and programmatic Node.js library designed to dynamically enable, disable, and synchronize feature-based code blocks across both codebase files and databases (MySQL / PostgreSQL).
 
-By utilizing special syntax tags inside code comments, Modulix allows you to toggle feature blocks on and off on-demand, clean up inactive feature code, and store clean, block-only templates without cluttering your repository.
+By using tag markers in your comments, Modulix allows you to toggle feature blocks on and off on-demand, clean up inactive feature code, swap codebase backups, and compile database schemas seamlessly.
 
 ---
 
-## Key Features
+## Language & Database Compatibility
 
--  **Dynamic Code Syncing**: Fills or cleans up code between tag markers based on whether the module is enabled or disabled.
--  **Block-Based Templates**: Stores *only* the tagged code blocks inside templates, rather than copying entire files.
--  **Beautiful Interactive CLI**: Built using `@clack/prompts` for premium terminal visuals, spinner animations, and checkbox selectors.
--  **Smart File Filtering**: Supports `includes` and `excludes` rules to filter files during template creation and syncing.
--  **Built-in Backups**: Automatically backs up project files before applying synchronization.
+Modulix provides stable parsing, block synchronization, and execution for the following environments:
+
+| Technology | Extension / Tool | Comment Style | Status |
+| :--- | :--- | :--- | :--- |
+| **JavaScript** | `.js`, `.mjs`, `.cjs` | `// @module block` or `/* @module block */` | **Stable** |
+| **TypeScript** | `.ts`, `.tsx` | `// @module block` or `/* @module block */` | **Stable** |
+| **PHP** | `.php` | `// @module block`, `/* @module block */`, or `# @module block` | **Stable** |
+| **HTML** | `.html`, `.htm` | `<!-- @module block -->` | **Stable** |
+| **CSS** | `.css`, `.scss`, `.less` | `/* @module block */` | **Stable** |
+| **Go** | `.go` | `// @module block` or `/* @module block */` | **Stable** |
+| **C#** | `.cs` | `// @module block` or `/* @module block */` | **Stable** |
+| **SQL** | `.sql` | `-- @module block` or `/* @module block */` | **Stable** |
+| **MySQL** | `mysqldump` & `mysql` | `-- @module block` | **Stable** (With custom binary paths) |
+| **PostgreSQL** | `pg_dump` & `psql` | `-- @module block` | **Stable** (With custom binary paths) |
 
 ---
 
 ## Installation
 
 Install locally in your project:
-
 ```bash
 npm install --save-dev modulix
 ```
 
 Or install globally:
-
 ```bash
 npm install -g modulix
 ```
 
-This installs both the `modulix` and its shortcut alias `mdl` command.
+This registers the global `modulix` CLI and its shortcut alias `mdl`.
 
 ---
 
 ## Tag Syntax
 
-Mark any part of your code with `@<moduleName> <blockName>` and `@!<moduleName> <blockName>` markers.
+Mark any part of your code with `@<moduleName> <blockName>` and `@!<moduleName> <blockName>` markers in comments.
 
-### Line-based blocks
+### 1. Code Block Comments (JS/TS/PHP/C#/Go)
 ```javascript
-// @auth auth-init
+// @auth users-table
 const authService = new AuthService();
 setupAuthListeners(authService);
-// @!auth auth-init
+// @!auth users-table
 ```
 
-### Inline / Expression-based blocks
+### 2. Inline / Expression Comments
 ```javascript
-return 'Login status: ' + /*@auth auth-msg*/ 'Login successful!' /*@!auth auth-msg*/;
+return 'Status: ' + /*@auth auth-msg*/ 'Logged In!' /*@!auth auth-msg*/;
+```
+
+### 3. HTML Comments
+```html
+<!-- @billing invoice-panel -->
+<div class="billing-container">
+  <h3>Invoices</h3>
+</div>
+<!-- @!billing invoice-panel -->
+```
+
+### 4. SQL / Database Comments
+```sql
+-- @auth users-schema
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(50)
+);
+-- @!auth users-schema
+```
+
+### 5. File-Level Module Tagging
+If you write `@@<moduleName>` on the very first line of a file, the entire file will be treated as a block of that module. If the module is disabled, the file is automatically deleted; once re-enabled and synced, it will be restored.
+```php
+// @@auth
+<?php
+// Entire file belongs to "auth" module.
+?>
+// @@!auth
 ```
 
 ---
 
-## Quick Start
+## CLI Command Reference (Logical Order)
 
-### 1. Initialize Configuration
-Define the project directory you want to work on:
-```bash
-mdl config set cwd --path /path/to/your/project
+### 1. Configuration Settings (`config`)
+Used to configure target directories, file extension filters, and database connection details.
+
+* **Show Config**: Shows the active workspace configurations.
+  ```bash
+  mdl config show
+  ```
+* **Set Target Workspace Path (`cwd`)**: Sets the root folder to scan.
+  ```bash
+  mdl config set cwd --path /path/to/your/project
+  ```
+* **Include Extensions**: Restricts scanning to specific file extensions.
+  ```bash
+  mdl config set includes add .php
+  mdl config set includes add .html
+  ```
+* **Exclude Folders**: Ignores specific folders (e.g. dependencies, vendor directories).
+  ```bash
+  mdl config set excludes add node_modules
+  ```
+* **Monorepo / Multi-Folder Sync (`folder`)**: Configures multiple subdirectories.
+  ```bash
+  mdl config set folder --path ./client
+  mdl config set folder --path ./server
+  ```
+* **Set Database Connections (`db`)**: Configures MySQL or PostgreSQL. Includes interactive wizard prompting for credentials and optional custom executable paths.
+  ```bash
+  mdl config set db
+  ```
+
+---
+
+### 2. Module Settings (`modules`)
+Allows declaring modules, listing statuses, and toggling features.
+
+* **Add Modules**: Declare new module names.
+  ```bash
+  mdl modules add
+  ```
+* **Remove Modules**: Delete module declarations.
+  ```bash
+  mdl modules remove billing
+  ```
+* **List Modules**: Lists all modules and statuses (green if active, red if disabled).
+  ```bash
+  mdl modules list
+  ```
+* **Enable Module**: Activate a module.
+  ```bash
+  mdl modules enable auth
+  ```
+* **Disable Module**: Deactivate a module.
+  ```bash
+  mdl modules disable auth
+  ```
+* **Reset Modules**: Clear all module declarations.
+  ```bash
+  mdl modules clear
+  ```
+
+---
+
+### 3. Templates Management (`templates`)
+Saves code block templates before stripping them out of the source codebase during sync.
+
+* **Add Template**: Saves the current state of all tagged code blocks into a template.
+  ```bash
+  mdl templates add base-template
+  ```
+* **List Templates**: Lists all saved templates with creation dates.
+  ```bash
+  mdl templates list
+  ```
+* **Remove Template**: Interactive prompt to delete templates.
+  ```bash
+  mdl templates remove
+  ```
+
+---
+
+### 4. Workspace Synchronization (`sync`)
+Synchronizes your workspace files based on the active modules list and selected template.
+
+* **Sync Codebase**: Scans files, clears blocks of disabled modules, and populates active blocks from the template.
+  ```bash
+  mdl modules sync
+  ```
+  *(If no template is specified, it opens an interactive selector list)*
+
+---
+
+### 5. Codebase Backups (`backup`)
+Manages filesystem snapshots of your folders before applying sync operations.
+
+* **Create Backup**: Manual codebase backup.
+  ```bash
+  mdl backup create initial-state
+  ```
+* **List Backups**: Lists backups with creation dates and directory sizes.
+  ```bash
+  mdl backup list
+  ```
+* **Status**: Lists structural differences (created, modified, deleted files) between a backup and the workspace.
+  ```bash
+  mdl backup status initial-state
+  ```
+* **Swap (Restore)**: Restores workspace files back to a backup state.
+  ```bash
+  mdl backup swap initial-state
+  ```
+* **Remove**: Deletes codebase backups.
+  ```bash
+  mdl backup remove initial-state
+  ```
+
+---
+
+### 6. Database Operations (`db`)
+Performs schema synchronization, backups, and restores for databases.
+
+* **Sync Database**: Compiles the template SQL schema (e.g. `schema.sql`), filters it based on active modules, drops the active schema, and imports the filtered structure.
+  ```bash
+  mdl db sync base-template
+  ```
+  *(If the template is missing a schema file, it prompts you to type a custom path)*
+* **Create DB Backup**: Dumps live database structure + data.
+  ```bash
+  mdl db backup create v1-db-backup
+  ```
+* **List DB Backups**: Lists SQL database backups.
+  ```bash
+  mdl db backup list
+  ```
+* **Swap DB (Restore)**: Drops database tables and restores schema + data from the SQL backup file.
+  ```bash
+  mdl db backup swap v1-db-backup
+  ```
+* **Remove DB Backups**: Deletes database backup files.
+  ```bash
+  mdl db backup remove v1-db-backup
+  ```
+
+---
+
+## Example Scenario Walkthrough
+
+Let's walk through managing an **Authentication (`auth`)** module on a web project containing PHP, HTML, CSS, and MySQL.
+
+### Step 1: Write code with Modulix tags
+
+#### 1. In `index.php` (PHP Logic & HTML)
+```php
+<?php
+// @auth auth-logic
+include 'auth.php';
+// @!auth auth-logic
+?>
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    /* @auth auth-style */
+    .login-btn { background-color: #4CAF50; color: white; }
+    /* @!auth auth-style */
+  </style>
+</head>
+<body>
+  <!-- @auth auth-button -->
+  <button class="login-btn">Log In</button>
+  <!-- @!auth auth-button -->
+</body>
+</html>
 ```
 
-Add filters for files to scan (e.g. only scan `js` and `ts` files, ignore `node_modules`):
-```bash
-mdl config set includes add js
-mdl config set includes add ts
-mdl config set excludes add node_modules
+#### 2. In `auth.php` (Entire file belongs to `auth`)
+```php
+// @@auth
+<?php
+class AuthService {
+  public function login() { /* ... */ }
+}
+// @@!auth
 ```
 
-Check the active configuration settings at any time:
-```bash
-mdl config show
+#### 3. In `schema.sql` (MySQL Schema template)
+```sql
+-- @auth auth-schema
+CREATE TABLE users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL
+);
+-- @!auth auth-schema
 ```
 
-### 2. Configure Modules
-Configure the modules present in your project:
+---
+
+### Step 2: Configure Workspace & Databases
+Initialize Modulix settings and configure MySQL connections:
 ```bash
-mdl modules add auth,cargos,billing
+mdl config set cwd --path .
+mdl config set includes add .php
+mdl config set includes add .html
+mdl config set includes add .css
+mdl config set includes add .sql
+
+mdl config set db
 ```
 
-Enable or disable specific modules:
-```bash
-mdl modules enable cargos
-mdl modules disable billing
-```
+---
 
-List all modules in your project. Active modules are printed in **green**, and disabled ones are in **red**:
+### Step 3: Register and Save Template
+Add the `auth` module and save the base code block templates:
 ```bash
-mdl modules list
+mdl modules add auth
+mdl templates add v1-template
 ```
+*(Modulix extracts all code inside `@auth ... @!auth` and saves them in `.modulix/templates/v1-template`)*
 
-### 3. Manage Templates
-Save the current state of your code blocks into a reusable template. The CLI scans your files, validates tags, extracts only the blocked content, and stores them:
+---
+
+### Step 4: Toggle & Sync (Disabling the Auth Module)
+Let's disable the authentication module and synchronize the workspace:
 ```bash
-mdl templates add my-cargo-template
+mdl modules disable auth
+mdl modules sync v1-template
 ```
+#### Result:
+* **`index.php`** is cleaned up:
+  ```php
+  <?php
+  // @auth auth-logic
+  // @!auth auth-logic
+  ?>
+  <!DOCTYPE html>
+  <html>
+  <head>
+    <style>
+      /* @auth auth-style */
+      /* @!auth auth-style */
+    </style>
+  </head>
+  <body>
+    <!-- @auth auth-button -->
+    <!-- @!auth auth-button -->
+  </body>
+  </html>
+  ```
+* **`auth.php`** is automatically deleted (since the module is disabled and it has `@@auth` at the top and `@@!auth` at the bottom.).
+* Now, sync the database:
+  ```bash
+  mdl db sync v1-template
+  ```
+  *(Modulix compiles the `schema.sql` template, removes the `users` table creation script, and recreates the MySQL database clean without the `users` table!)*
 
-List all saved templates:
+---
+
+### Step 5: Restoring (Re-enabling the Auth Module)
+To bring the feature back to both the codebase and the database:
 ```bash
-mdl templates list
+mdl modules enable auth
+mdl modules sync v1-template
+mdl db sync v1-template
 ```
+#### Result:
+* The code block inside `index.php` is restored from the template.
+* `auth.php` is recreated and restored.
+* The `users` table is recreated inside the MySQL database!
 
-Remove templates using an interactive multi-select interface:
-```bash
-mdl templates remove
-```
-
-### 4. Sync Code
-Synchronize your workspace. Choose a template with its creation date from the list. The CLI will automatically fill active module blocks with code from the template and completely clear out inactive module blocks:
-```bash
-mdl modules sync
-```
-
+---
 
 ## Contributing
 
-Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/) to report bugs or request features.
+Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/arifaydin16/modulix/issues) to report bugs or request features.
 
 ## License
 
