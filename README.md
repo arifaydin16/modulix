@@ -29,17 +29,22 @@ Modulix provides stable parsing, block synchronization, and execution for the fo
 
 ## Installation
 
-Install locally in your project:
-```bash
-npm install --save-dev modulix
-```
-
-Or install globally:
+Install globally:
 ```bash
 npm install -g modulix
 ```
 
 This registers the global `modulix` CLI and its shortcut alias `mdl`.
+
+---
+
+## Initialization
+
+Before using Modulix in a project, initialize a local configuration in the root directory:
+```bash
+mdl init
+```
+This creates a local `.modulix` directory with a default `config.json` inside your project. The CLI will automatically use this local configuration when executed from within this directory, keeping different project settings completely isolated.
 
 ---
 
@@ -80,18 +85,24 @@ CREATE TABLE users (
 ```
 
 ### 5. File-Level Module Tagging
-If you write `@@<moduleName>` on the very first line of a file, the entire file will be treated as a block of that module. If the module is disabled, the file is automatically deleted; once re-enabled and synced, it will be restored.
+If you write `@@<moduleName> <blockName>` on the very first line of a file, the entire file will be treated as a block of that module. If the module is disabled, the file is automatically deleted; once re-enabled and synced, it will be restored.
 ```php
-// @@auth
+// @@auth auth-full-page
 <?php
 // Entire file belongs to "auth" module.
 ?>
-// @@!auth
+// @@!auth auth-full-page
 ```
 
 ---
 
 ## CLI Command Reference (Logical Order)
+
+### 0. Project Initialization (`init`)
+Initializes a local configuration folder `.modulix` and a default `config.json` file in the current directory.
+```bash
+mdl init
+```
 
 ### 1. Configuration Settings (`config`)
 Used to configure target directories, file extension filters, and database connection details.
@@ -269,12 +280,12 @@ include 'auth.php';
 
 #### 2. In `auth.php` (Entire file belongs to `auth`)
 ```php
-// @@auth
+// @@auth full-page
 <?php
 class AuthService {
   public function login() { /* ... */ }
 }
-// @@!auth
+// @@!auth full-page
 ```
 
 #### 3. In `schema.sql` (MySQL Schema template)
@@ -290,9 +301,10 @@ CREATE TABLE users (
 
 ---
 
-### Step 2: Configure Workspace & Databases
-Initialize Modulix settings and configure MySQL connections:
+### Step 2: Initialize & Configure Workspace
+Initialize a local Modulix configuration and set target settings:
 ```bash
+mdl init
 mdl config set cwd --path .
 mdl config set includes add .php
 mdl config set includes add .html
@@ -341,7 +353,7 @@ mdl modules sync v1-template
   </body>
   </html>
   ```
-* **`auth.php`** is automatically deleted (since the module is disabled and it has `@@auth` at the top and `@@!auth` at the bottom.).
+* **`auth.php`** is automatically deleted (since the module is disabled and it has `@@auth full-page` at the top and `@@!auth full-page` at the bottom.).
 * Now, sync the database:
   ```bash
   mdl db sync v1-template

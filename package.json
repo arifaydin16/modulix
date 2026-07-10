@@ -1,6 +1,6 @@
 {
   "name": "modulix",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A global CLI tool for modularization",
   "main": "dist/index.js",
   "module": "dist/index.js",
